@@ -8,21 +8,30 @@ class CTM:
 	def __init__(self, num_docs, num_topics, vocab_size, counts, max_iters, convergence_cutoff):
 		self.K = num_topics
 		self.num_docs = num_docs
+		self.num_topics = num_topics
+		self.vocab_size = vocab_size
 		self.mu = np.zeros(num_topics)
 		self.sigma = np.diag(np.ones(num_topics))
 		self.sigma_inv = inv(self.sigma)
-		#self.betaa = np.ones((num_topics, vocab_size))
 		self.beta =  np.random.uniform(0, 1, (num_topics, vocab_size))
-		self.lambdas = np.zeros(num_topics)
-		self.nus_squared = np.ones(num_topics)
-		self.phi = 1.0/num_topics*np.ones((vocab_size, num_topics))
-		self.update_zeta()
-
+		#self.betaa = np.ones((num_topics, vocab_size))
+		#self.beta =  np.random.uniform(0, 1, (num_topics, vocab_size))
+		#self.lambdas = np.zeros(num_topics)
+		#self.nus_squared = np.ones(num_topics)
+		#self.phi = 1.0/num_topics*np.ones((vocab_size, num_topics))
+		#self.update_zeta()
+		self.reset_variational_parameters()
 		
 		self.counts = counts
-		self.vocab_size = vocab_size
+		
 		self.max_iters = max_iters
 		self.convergence_cutoff = convergence_cutoff
+
+	def reset_variational_parameters(self):
+		self.lambdas = np.zeros(self.num_topics)
+		self.nus_squared = np.ones(self.num_topics)
+		self.phi = 1.0/self.num_topics*np.ones((self.vocab_size, self.num_topics))
+		self.update_zeta()
 
 	# Updates zeta using equation 14
 	def update_zeta(self):
@@ -56,8 +65,9 @@ class CTM:
 		#res = fmin_cg(lambda x: -obj(x), self.lambdas, fprime=lambda x: -derivative(x), full_output=True)
 		#print res, '\n'
 		opts = {         
-			'disp' : True,    # non-default value.
+			'disp' : False,    # non-default value.
 			'gtol' : 1e-5}
+		#print "Minimizing"
 		res = minimize(lambda x: -obj(x), self.lambdas, jac=lambda x: -derivative(x), method='CG', options=opts)
 		self.lambdas = res.x
 		#print obj(res2.x)
@@ -96,10 +106,13 @@ class CTM:
 			#return result
 		bounds = [(0, None) for i in range(self.K)]
 		res = minimize(lambda x: -obj(x), self.nus_squared, jac=lambda x: -derivative(x), method='L-BFGS-B', bounds=bounds)
+		#print self.nus_squared
 		self.nus_squared = res.x
 		#for rep in range(100):
 		#	print check_grad(lambda x: -obj(x), lambda y: -derivative(y), np.random.uniform(1., 10.0002, 2))
 
+	def full_bound(self):
+		return np.sum(self.bound(doc_id, self.lambdas, self.nus_squared) for doc_id in xrange(self.num_docs))
 	# This is based on equations 8-12 from CTM paper
 	def bound(self, doc_index, lamdas, nu_squared_vals):
 		N = self.getWordCount(doc_index)
@@ -119,33 +132,95 @@ class CTM:
 		total_bound += .5*(np.sum(np.log(nu_squared_vals))) + (self.K/2)*np.log(2*np.pi) +  self.K/2
 		return total_bound
 	def update_variational_parameters(self, doc_index):
-		before_bound = self.bound(doc_index, self.lambdas, self.nu_squared_vals)
+		before_bound = self.bound(doc_index, self.lambdas, self.nus_squared)
 		for it in xrange(self.max_iters):
 			self.update_zeta()
 			self.update_lambda(doc_index)
 			self.update_nu_squared(doc_index)
 			self.update_phi(doc_index)
-			after_bound = self.bound(doc_index, self.lambdas, self.nu_squared_vals)
+			after_bound = self.bound(doc_index, self.lambdas, self.nus_squared)
 			if abs((before_bound - after_bound)/before_bound) < self.convergence_cutoff:
 				before_bound = after_bound
 				break
 			before_bound = after_bound
 		return before_bound
-ctm = CTM(4, 2, 3, np.array([[1, 2, 3], [2, 1, 3], [2, 2, 2], [1, 4, 5]]), 50, .001)
-print ctm.K
-print ctm.lambdas
-print ctm.nus_squared
-print ctm.zeta
-print ctm.phi
+	def EM(self):
+		for it in xrange(self.max_iters):
+			beta_estimated = np.zeros((self.num_topics, self.vocab_size))
+			lambda_sum = np.zeros(self.num_topics)
+			sigma_sum = np.zeros((self.num_topics, self.num_topics))
+			nus_squared_d = []
+			lambda_d = []
+
+			old_lower_bound = self.full_bound()
+
+			# E step
+			for doc_index in xrange(self.num_docs):
+				self.reset_variational_parameters()
+				self.update_variational_parameters(doc_index)
+
+				# This multiplies each row (word) in phi, by the number of times that word appears in the doc
+				# See http://stackoverflow.com/questions/18522216/multiplying-across-in-a-numpy-array for broadcasting description
+				phi_weighted = np.multiply(self.phi, self.counts[doc_index][:, np.newaxis])
+
+				# Add these to the beta_estimated variable. This will be useful info for the M-step.
+				beta_estimated += phi_weighted.T
+				#lambda_sum += self.lambdas
+				lambda_d.append(self.lambdas)
+				nus_squared_d.append(self.nus_squared)
+
+			# M-Step
+			# Normalize the betas
+			for row in xrange(self.num_topics):
+				beta_estimated[row] = beta_estimated[row]/np.sum(beta_estimated[row])
+
+			self.beta = beta_estimated
+			self.mu = sum(lambda_d)/len(lambda_d)
+
+			for d in xrange(self.num_docs):
+				shifted = lambda_d[d] - self.mu
+				sigma_sum += np.diag(nus_squared_d[d]) + np.outer(shifted, shifted)
+			sigma_sum /= self.num_docs
+			self.sigma = sigma_sum
+			self.sigma_inv = inv(self.sigma)
+
+			new_lower_bound = self.full_bound()
+			print old_lower_bound, new_lower_bound
+
+
+
+
+
+
+
+
+
+
+
+
+ctm = CTM(4, 3, 3, np.array([[150, 12, 3], [17, 5, 1], [22, 2, 3], [1, 2, 3]]), 500, .001)
+ctm.EM()
+print ctm.sigma
+print ctm.beta
+#print ctm.K
+#print ctm.lambdas
+#print ctm.nus_squared
+#print ctm.zeta
+#print ctm.phi
 
 x = np.array([1,2,3])
 y = np.array([2,4,6])
-print 1./x
+#print [x, y]
+#print sum([x,y])
 #print np.sum(ctm.phi, axis=0)
 #ctm.update_lambda(2)
 ctm.update_nu_squared(2)
 
-print np.multiply(x, x.transpose())
+a = np.ones((3, 3))
+#print a
+#print np.multiply(a, np.array([1,2,3])[:, np.newaxis])
+
+#print np.outer(x, x)
 
 
 
