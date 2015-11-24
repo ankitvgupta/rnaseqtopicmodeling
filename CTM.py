@@ -145,7 +145,7 @@ print 1./x
 #ctm.update_lambda(2)
 ctm.update_nu_squared(2)
 
-print np.dot(x, x.transpose())
+print np.multiply(x, x.transpose())
 
 
 
