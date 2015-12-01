@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.linalg import inv, det
 from scipy.optimize import fmin_cg, minimize, check_grad
-
+import sys
 
 class CTM:
 	# counts is an array of num_docs x vocab_size, where the element is the number of counts of that word.
@@ -14,6 +14,7 @@ class CTM:
 		self.sigma = np.diag(np.ones(num_topics))
 		self.sigma_inv = inv(self.sigma)
 		self.beta =  np.random.uniform(0, 1, (num_topics, vocab_size))
+		self.saved_lambdas = np.zeros((num_docs, num_topics))
 		#self.betaa = np.ones((num_topics, vocab_size))
 		#self.beta =  np.random.uniform(0, 1, (num_topics, vocab_size))
 		#self.lambdas = np.zeros(num_topics)
@@ -30,6 +31,7 @@ class CTM:
 	def reset_variational_parameters(self):
 		self.lambdas = np.zeros(self.num_topics)
 		self.nus_squared = np.ones(self.num_topics)
+		#self.nus_squared = np.random.normal(1, .1, self.num_topics)
 		self.phi = 1.0/self.num_topics*np.ones((self.vocab_size, self.num_topics))
 		self.update_zeta()
 
@@ -65,8 +67,9 @@ class CTM:
 		#res = fmin_cg(lambda x: -obj(x), self.lambdas, fprime=lambda x: -derivative(x), full_output=True)
 		#print res, '\n'
 		opts = {         
-			'disp' : False,    # non-default value.
-			'gtol' : 1e-5}
+			'disp' : True,    # non-default value.
+			#'gtol' : 1e-12
+		}
 		#print "Minimizing"
 		res = minimize(lambda x: -obj(x), self.lambdas, jac=lambda x: -derivative(x), method='CG', options=opts)
 		self.lambdas = res.x
@@ -79,7 +82,7 @@ class CTM:
 		#print derivative([0,0]), derivative([1, 0]), derivative([-1, 0])
 
 		#for rep in range(100):
-		#	print check_grad(lambda x: -obj(x), lambda y: -derivative(y), np.random.uniform(0, .0002, 2))
+		#	print check_grad(lambda x: -obj(x), lambda y: -derivative(y), np.random.uniform(0, .0002, 3))
 	
 	def update_nu_squared(self, doc_index):
 		def obj(nu_sq):
@@ -98,23 +101,31 @@ class CTM:
 			grad += -N/(2.*self.zeta)*np.exp(self.lambdas + nu_sq/2) 
 			grad += .5/nu_sq
 			return grad
+		opts = {         
+			'disp' : False,    # non-default value.
+			#'ftol' : 1e-12,
+			#'gtol': 1e-12,
+			#'factr': 10.0
+			}
 			#result = np.zeros(self.K)
 			#for i in xrange(self.K):
 			#	result[i] = -.5*self.sigma_inv[i,i]
 			#	result[i] -= N/(2*self.zeta) * np.exp(self.lambdas[i] + .5*nu_sq[i])
 			#	result[i] += 1/(2*nu_sq[i])
 			#return result
-		bounds = [(0, None) for i in range(self.K)]
-		res = minimize(lambda x: -obj(x), self.nus_squared, jac=lambda x: -derivative(x), method='L-BFGS-B', bounds=bounds)
+		bounds = [(0., None) for i in range(self.K)]
+		res = minimize(lambda x: -obj(x), self.nus_squared, jac=lambda x: -derivative(x), method='TNC', bounds=bounds, options=opts)
 		#print self.nus_squared
 		self.nus_squared = res.x
 		#for rep in range(100):
-		#	print check_grad(lambda x: -obj(x), lambda y: -derivative(y), np.random.uniform(1., 10.0002, 2))
+		#	print check_grad(lambda x: -obj(x), lambda y: -derivative(y), np.random.uniform(1., 10.0002, 3))
 
 	def full_bound(self):
 		return np.sum(self.bound(doc_id, self.lambdas, self.nus_squared) for doc_id in xrange(self.num_docs))
 	# This is based on equations 8-12 from CTM paper
 	def bound(self, doc_index, lamdas, nu_squared_vals):
+		#print "Bound on doc", doc_index
+		sys.stdout.flush()
 		N = self.getWordCount(doc_index)
 		total_bound = 0.0
 		total_bound += .5*np.log(det(self.sigma_inv))
@@ -134,15 +145,27 @@ class CTM:
 	def update_variational_parameters(self, doc_index):
 		before_bound = self.bound(doc_index, self.lambdas, self.nus_squared)
 		for it in xrange(self.max_iters):
+			print "     Updating Zeta"
+			sys.stdout.flush()
 			self.update_zeta()
+			print "     Updating Lambda"
+			sys.stdout.flush()
 			self.update_lambda(doc_index)
+			print "     Updating Nu"
+			sys.stdout.flush()
 			self.update_nu_squared(doc_index)
+			print "     Updating Phi"
+			sys.stdout.flush()
 			self.update_phi(doc_index)
 			after_bound = self.bound(doc_index, self.lambdas, self.nus_squared)
+			print "     Bound comparison", before_bound, after_bound
+			sys.stdout.flush()
 			if abs((before_bound - after_bound)/before_bound) < self.convergence_cutoff:
 				before_bound = after_bound
 				break
 			before_bound = after_bound
+		#print self.phi
+		#sys.stdout.flush()
 		return before_bound
 	def EM(self):
 		for it in xrange(self.max_iters):
@@ -152,22 +175,29 @@ class CTM:
 			nus_squared_d = []
 			lambda_d = []
 
-			old_lower_bound = self.full_bound()
+			#old_lower_bound = self.full_bound()
 
 			# E step
 			for doc_index in xrange(self.num_docs):
+				print "E step for doc", doc_index
+				sys.stdout.flush()
 				self.reset_variational_parameters()
 				self.update_variational_parameters(doc_index)
 
 				# This multiplies each row (word) in phi, by the number of times that word appears in the doc
 				# See http://stackoverflow.com/questions/18522216/multiplying-across-in-a-numpy-array for broadcasting description
+				#print self.phi
+				#print self.phi.shape
+				#print self.counts[doc_index]
+				#print self.counts[doc_index].shape
+				sys.stdout.flush()
+				#phi_weighted = np.multiply(self.phi, self.counts[doc_index].T)
 				phi_weighted = np.multiply(self.phi, self.counts[doc_index][:, np.newaxis])
-
-				# Add these to the beta_estimated variable. This will be useful info for the M-step.
 				beta_estimated += phi_weighted.T
-				#lambda_sum += self.lambdas
+				self.saved_lambdas[doc_index] = self.lambdas
 				lambda_d.append(self.lambdas)
 				nus_squared_d.append(self.nus_squared)
+			print lambda_d
 
 			# M-Step
 			# Normalize the betas
@@ -184,8 +214,9 @@ class CTM:
 			self.sigma = sigma_sum
 			self.sigma_inv = inv(self.sigma)
 
-			new_lower_bound = self.full_bound()
-			print old_lower_bound, new_lower_bound
+			#new_lower_bound = self.full_bound()
+			#print old_lower_bound, new_lower_bound
+			#sys.stdout.flush()
 
 
 
@@ -196,31 +227,35 @@ class CTM:
 
 
 
+if __name__ == "__main__":
 
+	ctm = CTM(4, 3, 3, np.array([[150, 12, 3], [17, 5, 1], [22, 2, 3], [1, 2, 3]]), 50, .001)
+	ctm.EM()
+	print "space"
+	print ctm.mu
+	print ctm.sigma
+	print ctm.beta
+	print ctm.saved_lambdas
 
-ctm = CTM(4, 3, 3, np.array([[150, 12, 3], [17, 5, 1], [22, 2, 3], [1, 2, 3]]), 500, .001)
-ctm.EM()
-print ctm.sigma
-print ctm.beta
-#print ctm.K
-#print ctm.lambdas
-#print ctm.nus_squared
-#print ctm.zeta
-#print ctm.phi
+	#print ctm.K
+	#print ctm.lambdas
+	#print ctm.nus_squared
+	#print ctm.zeta
+	#print ctm.phi
 
-x = np.array([1,2,3])
-y = np.array([2,4,6])
-#print [x, y]
-#print sum([x,y])
-#print np.sum(ctm.phi, axis=0)
-#ctm.update_lambda(2)
-ctm.update_nu_squared(2)
+	x = np.array([1,2,3])
+	y = np.array([2,4,6])
+	#print [x, y]
+	#print sum([x,y])
+	#print np.sum(ctm.phi, axis=0)
+	#ctm.update_lambda(2)
+	ctm.update_nu_squared(2)
 
-a = np.ones((3, 3))
-#print a
-#print np.multiply(a, np.array([1,2,3])[:, np.newaxis])
+	a = np.ones((3, 3))
+	#print a
+	#print np.multiply(a, np.array([1,2,3])[:, np.newaxis])
 
-#print np.outer(x, x)
+	#print np.outer(x, x)
 
 
 
