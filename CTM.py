@@ -29,9 +29,8 @@ class CTM:
 		self.convergence_cutoff = convergence_cutoff
 
 	def reset_variational_parameters(self):
-		self.lambdas = np.zeros(self.num_topics)
+		self.lambdas = np.random.uniform(0, 1, self.num_topics)#np.zeros(self.num_topics)
 		self.nus_squared = np.ones(self.num_topics)
-		#self.nus_squared = np.random.normal(1, .1, self.num_topics)
 		self.phi = 1.0/self.num_topics*np.ones((self.vocab_size, self.num_topics))
 		self.update_zeta()
 
@@ -67,11 +66,12 @@ class CTM:
 		#res = fmin_cg(lambda x: -obj(x), self.lambdas, fprime=lambda x: -derivative(x), full_output=True)
 		#print res, '\n'
 		opts = {         
-			'disp' : True,    # non-default value.
+			'disp' : False,    # non-default value.
 			#'gtol' : 1e-12
 		}
-		#print "Minimizing"
-		res = minimize(lambda x: -obj(x), self.lambdas, jac=lambda x: -derivative(x), method='CG', options=opts)
+		#print self.lambdas
+		res = minimize(lambda x: -obj(x), self.lambdas, jac=lambda x: -derivative(x), method='Newton-CG', options=opts)
+		#print res
 		self.lambdas = res.x
 		#print obj(res2.x)
 		#print derivative(res2.x)
@@ -189,10 +189,11 @@ class CTM:
 				#print self.phi
 				#print self.phi.shape
 				#print self.counts[doc_index]
-				#print self.counts[doc_index].shape
+				#print self.lambdas
 				sys.stdout.flush()
 				#phi_weighted = np.multiply(self.phi, self.counts[doc_index].T)
 				phi_weighted = np.multiply(self.phi, self.counts[doc_index][:, np.newaxis])
+				# Add these to the beta_estimated variable. This will be useful info for the M-step.
 				beta_estimated += phi_weighted.T
 				self.saved_lambdas[doc_index] = self.lambdas
 				lambda_d.append(self.lambdas)
@@ -231,12 +232,8 @@ if __name__ == "__main__":
 
 	ctm = CTM(4, 3, 3, np.array([[150, 12, 3], [17, 5, 1], [22, 2, 3], [1, 2, 3]]), 50, .001)
 	ctm.EM()
-	print "space"
-	print ctm.mu
 	print ctm.sigma
 	print ctm.beta
-	print ctm.saved_lambdas
-
 	#print ctm.K
 	#print ctm.lambdas
 	#print ctm.nus_squared

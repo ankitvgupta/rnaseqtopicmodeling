@@ -15,7 +15,7 @@ def variational_update_doc_x(model, doc_index):
 
 class CTMParallel:
 	# counts is an array of num_docs x vocab_size, where the element is the number of counts of that word.
-	def __init__(self, num_docs, num_topics, vocab_size, counts, max_iters, convergence_cutoff):
+	def __init__(self, num_docs, num_topics, vocab_size, numProcesses, counts, max_iters, convergence_cutoff):
 		self.K = num_topics
 		self.num_docs = num_docs
 		self.num_topics = num_topics
@@ -24,6 +24,7 @@ class CTMParallel:
 		self.sigma = np.diag(np.ones(num_topics))
 		self.sigma_inv = inv(self.sigma)
 		self.beta =  np.random.uniform(0, 1, (num_topics, vocab_size))
+		self.saved_lambdas = np.zeros((num_docs, num_topics))
 		#self.betaa = np.ones((num_topics, vocab_size))
 		#self.beta =  np.random.uniform(0, 1, (num_topics, vocab_size))
 		#self.lambdas = np.zeros(num_topics)
@@ -36,6 +37,7 @@ class CTMParallel:
 		
 		self.max_iters = max_iters
 		self.convergence_cutoff = convergence_cutoff
+		self.numProcesses = numProcesses
 
 	def reset_variational_parameters(self):
 		self.lambdas = np.zeros(self.num_topics)
@@ -79,7 +81,7 @@ class CTMParallel:
 			#'gtol' : 1e-12
 		}
 		#print "Minimizing"
-		res = minimize(lambda x: -obj(x), self.lambdas, jac=lambda x: -derivative(x), method='CG', options=opts)
+		res = minimize(lambda x: -obj(x), self.lambdas, jac=lambda x: -derivative(x), method='Newton-CG', options=opts)
 		self.lambdas = res.x
 		#print obj(res2.x)
 		#print derivative(res2.x)
@@ -179,13 +181,15 @@ class CTMParallel:
 	# Result contains zeta, lambda, nu2, phi
 	def callback(self, result):
 		doc_index, zeta, lam, nu2, phi = result
-		phi_weighted = np.multiply(phi, self.counts[doc_index].T)
-
+		#phi_weighted = np.multiply(phi, self.counts[doc_index].T)
+		phi_weighted = np.multiply(phi, self.counts[doc_index][:, np.newaxis])
+		#print "Callback printing", doc_index, zeta, lam, nu2, phi
+		#sys.stdout.flush()
 		# Add these to the beta_estimated variable. This will be useful info for the M-step.
 		self.beta_estimated += phi_weighted.T
 		self.lambda_d.append(lam)
 		self.nus_squared_d.append(nu2)
-
+		self.saved_lambdas[doc_index] = lam
 
 	def EM(self):
 		for it in xrange(self.max_iters):
@@ -195,12 +199,19 @@ class CTMParallel:
 			self.lambda_d = []
 
 			#old_lower_bound = self.full_bound()
-			pool = mp.Pool()
-			for doc_index in xrange(self.num_docs):
-				pool.apply_async(variational_update_doc_x, args=(copy.deepcopy(self), doc_index, ), callback=self.callback)
-			pool.close()
-			pool.join()
-			print self.lambda_d
+			
+			current_doc = 0
+			doc_step = 64
+			while current_doc < self.num_docs:
+				pool = mp.Pool(processes=self.numProcesses)
+				for doc_index in xrange(current_doc, min(self.num_docs, current_doc + doc_step)):
+					pool.apply_async(variational_update_doc_x, args=(copy.deepcopy(self), doc_index, ), callback=self.callback)
+				pool.close()
+				pool.join()
+				current_doc += doc_step
+				
+			#print "Lambdas are", self.lambda_d
+			sys.stdout.flush()
 
 			# E step
 			#for doc_index in xrange(self.num_docs):
@@ -253,7 +264,7 @@ class CTMParallel:
 
 if __name__ == "__main__":
 
-	ctm = CTMParallel(4, 3, 3, np.array([[150, 12, 3], [17, 5, 1], [22, 2, 3], [1, 2, 3]]), 50, .001)
+	ctm = CTMParallel(4, 3, 3, 4, np.array([[150, 12, 3], [17, 5, 1], [22, 2, 3], [1, 2, 3]]), 50, .001)
 	ctm.EM()
 	print ctm.sigma
 	print ctm.beta
