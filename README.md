@@ -11,7 +11,7 @@ Many of the files in this repository are meant for a cluster computing environme
 
 ## Important Files
 - [CTM.py](CTM.py): An implementation of Correlated Topic Models (Serial).
-- [CTMParalle.py](CTMParallel.py): A parallelized version of CTM using python multiprocessing. This was used for the majority of the simultations in this research, and was run on 64-core nodes on Harvard's Odyssey cluster.
-- Files beginning with RunCTM_*: These files were used to load the various data files, and run the appriopriate CTM algorithm
+- [CTMParallel.py](CTMParallel.py): A parallelized version of CTM using python multiprocessing. This was used for the majority of the simulations in this research, and was run on 64-core nodes on Harvard's Odyssey cluster.
+- Files matching RunCTM*: These files were used to load the various data files, and run the appriopriate CTM algorithm
 - Files matching run_ctm_*.sh: These files were using by sbatch to run jobs on Harvard's Odyssey cluster. 
 
