@@ -1,3 +1,9 @@
+###########################
+# A Parallelized implementation of CTM using Python Multiprocessing
+#
+# Author: Ankit Gupta
+###########################
+
 import numpy as np
 from numpy.linalg import inv, det
 from scipy.optimize import fmin_cg, minimize, check_grad
@@ -25,12 +31,6 @@ class CTMParallel:
 		self.sigma_inv = inv(self.sigma)
 		self.beta =  np.random.uniform(0, 1, (num_topics, vocab_size))
 		self.saved_lambdas = np.zeros((num_docs, num_topics))
-		#self.betaa = np.ones((num_topics, vocab_size))
-		#self.beta =  np.random.uniform(0, 1, (num_topics, vocab_size))
-		#self.lambdas = np.zeros(num_topics)
-		#self.nus_squared = np.ones(num_topics)
-		#self.phi = 1.0/num_topics*np.ones((vocab_size, num_topics))
-		#self.update_zeta()
 		self.reset_variational_parameters()
 		
 		self.counts = counts
@@ -74,35 +74,18 @@ class CTMParallel:
 			return tmp
 
 		# As the paper says, now we can use a gradient based minimizer to minimize this. So, we can use BFGS
-		#res = fmin_cg(lambda x: -obj(x), self.lambdas, fprime=lambda x: -derivative(x), full_output=True)
-		#print res, '\n'
 		opts = {         
 			'disp' : False,    # non-default value.
 			#'gtol' : 1e-12
 		}
-		#print "Minimizing"
 		res = minimize(lambda x: -obj(x), self.lambdas, jac=lambda x: -derivative(x), method='Newton-CG', options=opts)
 		self.lambdas = res.x
-		#print obj(res2.x)
-		#print derivative(res2.x)
-		#print res2.x
-		#print res2
-		#print self.lambdas
-		#print obj([0,0]), obj([1, 0]), obj([-1, 0])
-		#print derivative([0,0]), derivative([1, 0]), derivative([-1, 0])
 
 		#for rep in range(100):
 		#	print check_grad(lambda x: -obj(x), lambda y: -derivative(y), np.random.uniform(0, .0002, 3))
 	
 	def update_nu_squared(self, doc_index):
 		def obj(nu_sq):
-			#N = self.getWordCount(doc_index)
-			#total = 0
-			#total -= .5*(np.trace(np.dot(np.diag(nu_sq), self.sigma_inv)))
-			#total += N*(-1./self.zeta*(np.sum(np.exp(self.lambdas + nu_sq/2))))
-			#total += .5*(np.sum(np.log(nu_sq)))
-			#print total
-			#return total
 			return self.bound(doc_index, self.lambdas, nu_sq)
 		def derivative(nu_sq):
 			N = self.getWordCount(doc_index)
@@ -113,19 +96,9 @@ class CTMParallel:
 			return grad
 		opts = {         
 			'disp' : False,    # non-default value.
-			#'ftol' : 1e-12,
-			#'gtol': 1e-12,
-			#'factr': 10.0
 			}
-			#result = np.zeros(self.K)
-			#for i in xrange(self.K):
-			#	result[i] = -.5*self.sigma_inv[i,i]
-			#	result[i] -= N/(2*self.zeta) * np.exp(self.lambdas[i] + .5*nu_sq[i])
-			#	result[i] += 1/(2*nu_sq[i])
-			#return result
 		bounds = [(0., None) for i in range(self.K)]
 		res = minimize(lambda x: -obj(x), self.nus_squared, jac=lambda x: -derivative(x), method='TNC', bounds=bounds, options=opts)
-		#print self.nus_squared
 		self.nus_squared = res.x
 		#for rep in range(100):
 		#	print check_grad(lambda x: -obj(x), lambda y: -derivative(y), np.random.uniform(1., 10.0002, 3))
@@ -181,10 +154,7 @@ class CTMParallel:
 	# Result contains zeta, lambda, nu2, phi
 	def callback(self, result):
 		doc_index, zeta, lam, nu2, phi = result
-		#phi_weighted = np.multiply(phi, self.counts[doc_index].T)
 		phi_weighted = np.multiply(phi, self.counts[doc_index][:, np.newaxis])
-		#print "Callback printing", doc_index, zeta, lam, nu2, phi
-		#sys.stdout.flush()
 		# Add these to the beta_estimated variable. This will be useful info for the M-step.
 		self.beta_estimated += phi_weighted.T
 		self.lambda_d.append(lam)
@@ -197,8 +167,6 @@ class CTMParallel:
 			sigma_sum = np.zeros((self.num_topics, self.num_topics))
 			self.nus_squared_d = []
 			self.lambda_d = []
-
-			#old_lower_bound = self.full_bound()
 			
 			current_doc = 0
 			doc_step = 64
@@ -210,32 +178,8 @@ class CTMParallel:
 				pool.join()
 				current_doc += doc_step
 				
-			#print "Lambdas are", self.lambda_d
 			sys.stdout.flush()
 
-			# E step
-			#for doc_index in xrange(self.num_docs):
-			#	print "E step for doc", doc_index
-			#	sys.stdout.flush()
-			#	self.reset_variational_parameters()
-			#	self.update_variational_parameters(doc_index)
-
-				# This multiplies each row (word) in phi, by the number of times that word appears in the doc
-				# See http://stackoverflow.com/questions/18522216/multiplying-across-in-a-numpy-array for broadcasting description
-				#print self.phi
-				#print self.phi.shape
-				#print self.counts[doc_index]
-				#print self.counts[doc_index].shape
-			#	sys.stdout.flush()
-			#	phi_weighted = np.multiply(self.phi, self.counts[doc_index].T)
-
-				# Add these to the beta_estimated variable. This will be useful info for the M-step.
-			#	beta_estimated += phi_weighted.T
-			#	lambda_d.append(self.lambdas)
-			#	nus_squared_d.append(self.nus_squared)
-
-			# M-Step
-			# Normalize the betas
 			for row in xrange(self.num_topics):
 				self.beta_estimated[row] = self.beta_estimated[row]/np.sum(self.beta_estimated[row])
 
@@ -249,18 +193,6 @@ class CTMParallel:
 			self.sigma = sigma_sum
 			self.sigma_inv = inv(self.sigma)
 
-			#new_lower_bound = self.full_bound()
-			#print old_lower_bound, new_lower_bound
-			#sys.stdout.flush()
-
-
-
-
-
-
-
-
-
 
 if __name__ == "__main__":
 
@@ -268,25 +200,13 @@ if __name__ == "__main__":
 	ctm.EM()
 	print ctm.sigma
 	print ctm.beta
-	#print ctm.K
-	#print ctm.lambdas
-	#print ctm.nus_squared
-	#print ctm.zeta
-	#print ctm.phi
 
 	x = np.array([1,2,3])
 	y = np.array([2,4,6])
-	#print [x, y]
-	#print sum([x,y])
-	#print np.sum(ctm.phi, axis=0)
-	#ctm.update_lambda(2)
 	ctm.update_nu_squared(2)
 
 	a = np.ones((3, 3))
-	#print a
-	#print np.multiply(a, np.array([1,2,3])[:, np.newaxis])
 
-	#print np.outer(x, x)
 
 
 
