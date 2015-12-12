@@ -4,7 +4,7 @@ A repository for research work involving topic modeling RNA-seq data.
 
 
 ## Overview
-This repository contains work involving applying various topic modeling algorithms to RNA-seq data. The goal is to investigation whether topic modeling can be used to conduct hypothesis-free analysis of RNA-seq data, and ultimately to conduct biological inference. 
+This repository contains work involving applying various topic modeling algorithms to RNA-seq data. The goal is to investigate whether topic modeling can be used to conduct hypothesis-free analysis of RNA-seq data, and ultimately to conduct biological inference. 
 
 ## A quick note
 Many of the files in this repository are meant for a cluster computing environment. For the purposes of this work, much of this was run on Harvard University's Odyssey Research Cluster.
